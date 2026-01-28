@@ -18,8 +18,8 @@ export default function GuestJoinPage() {
     if (!name.trim()) return
     setLoading(true)
 
-    // プレイヤー登録
-    const { error } = await supabase
+    // ★ここを変更: .select().single() を追加してIDを取得
+    const { data, error } = await supabase
       .from('players')
       .insert([
         {
@@ -29,16 +29,21 @@ export default function GuestJoinPage() {
           score: 0
         }
       ])
+      .select() 
+      .single()
 
     if (error) {
       console.error(error)
       alert('参加に失敗しました')
       setLoading(false)
     } else {
+      // ★ここで自分のIDをブラウザに保存（これがパスポートになります）
+      if (data) {
+        localStorage.setItem('mc_player_id', data.id)
+      }
       setJoined(true)
     }
   }
-
   // ★ゲーム開始待ちのリアルタイム監視（参加完了後のみ動く）
   useEffect(() => {
     if (!joined) return // 参加前なら何もしない
