@@ -65,16 +65,50 @@ export default function LobbyPage() {
         }
       )
       .subscribe()
+    // ★ 部屋のステータス監視（ゲーム開始を検知）
+    const roomChannel = supabase
+      .channel('room-status')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rooms',
+          filter: `id=eq.${roomId}`
+        },
+        (payload) => {
+          // ステータスが 'playing' になったらプレイ画面へGO
+          if (payload.new.status === 'playing') {
+            router.push(`/mission-complete/${roomId}/play`)
+          }
+        }
+      )
+      .subscribe()
+
+    
 
     // クリーンアップ（画面を離れる時に購読解除）
     return () => {
       supabase.removeChannel(channel)
+      supabase.removeChannel(roomChannel) // クリーンアップ追加
     }
   }, [roomId])
 
-  // ゲーム開始ボタンの処理（まだ画面はないけど準備）
-  const startGame = () => {
-    router.push(`/mission-complete/${roomId}/play`)
+  // ゲーム開始ボタンの処理
+  const startGame = async () => {
+    // 1. さっき作ったRPC（必殺技）を呼び出す
+    const { error } = await supabase.rpc('start_mission_game', { 
+      p_room_id: roomId 
+    })
+
+    if (error) {
+      console.error(error)
+      alert('ゲーム開始に失敗しました')
+      return
+    }
+    
+    // ここで router.push しなくてOK！
+    // 理由は下の「リアルタイム検知」で自動遷移させるからです。
   }
 
   return (
