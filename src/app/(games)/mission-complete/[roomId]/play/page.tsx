@@ -3,6 +3,7 @@
 import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import confetti from 'canvas-confetti' 
 
 // 型定義
 type Mission = { id: string; mission_content: string; status: string }
@@ -126,6 +127,10 @@ export default function PlayPage() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         (payload) => {
           if (payload.new.current_topic) setCurrentTopic(payload.new.current_topic)
+        // ★ここを追加：ステータスが finished になったらリザルトへ
+        if (payload.new.status === 'finished') {
+          router.push(`/mission-complete/${roomId}/result`)
+        }
         }
       ).subscribe()
     
@@ -145,6 +150,16 @@ export default function PlayPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
+   // ホスト用：ゲーム終了関数
+  const finishGame = async () => {
+    if (!confirm('本当にゲームを終了して結果発表に移りますか？')) return
+    
+    const { error } = await supabase.rpc('finish_game', { p_room_id: roomId })
+    if (error) {
+      alert('終了処理に失敗: ' + error.message)
+    }
+    // 成功すれば上のリアルタイム検知で勝手に遷移する
+  }
 
   if (loading) return <div className="text-center text-white mt-20">Loading...</div>
 
@@ -175,7 +190,7 @@ export default function PlayPage() {
                     🎲 話題を変える
                   </button>
                   <button 
-                    onClick={() => alert('リザルト画面は未実装です！')}
+                    onClick={finishGame} // ★ここを紐付け
                     className="w-full text-left px-4 py-3 hover:bg-gray-100 text-red-600 font-bold"
                   >
                     🏁 ゲーム終了
