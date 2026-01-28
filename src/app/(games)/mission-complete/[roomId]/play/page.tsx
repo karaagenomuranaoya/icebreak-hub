@@ -38,17 +38,36 @@ export default function PlayPage() {
     }
   }
 
-  // ミッション達成（自分）
+   // ミッション達成（わんこそば形式）
   const completeMission = async (missionId: string) => {
-    // UIを即座に更新（楽観的UI）
+    // 1. まず手元の画面で、押したやつを「完了」にする（見た目の即時反応）
     setMissions(prev => prev.map(m => m.id === missionId ? { ...m, status: 'completed' } : m))
     
-    // DB更新
-    await supabase
-      .from('mc_player_missions')
-      .update({ status: 'completed' })
-      .eq('id', missionId)
+    // 2. サーバーの必殺技を呼び出す
+    const { data: newMission, error } = await supabase.rpc('complete_and_refill', { 
+      p_mission_id: missionId 
+    })
+
+    if (error) {
+      console.error(error)
+      alert('通信エラーが発生しました')
+    } else if (newMission) {
+      // 3. サーバーから返ってきた「新しいミッション」をリストに追加する！
+      //    (少しアニメーション的な「間」があると気持ちいいので300ms待つ)
+      setTimeout(() => {
+         setMissions(prev => [
+           // 新しい順（上）に来るように追加するか、リストの下に追加するか
+           // ここでは「完了したのはそのまま、一番下に新しいのが来る」ようにします
+           ...prev, 
+           newMission as Mission
+         ])
+         
+         // ついでに「指令受信！」みたいな通知を自分だけに出すと盛り上がる
+         showNotification('📡 新しい指令を受信しました')
+      }, 500)
+    }
   }
+
 
   // 通知表示ヘルパー
   const showNotification = (msg: string) => {
@@ -183,7 +202,9 @@ export default function PlayPage() {
       <div className="p-4">
         <p className="text-gray-500 font-bold text-sm mb-4 ml-2">YOUR MISSIONS</p>
         <div className="space-y-4">
-          {missions.map((mission) => (
+          {missions
+          // ★並び替え: 未達成(pending)が先、完了(completed)は後ろ
+            .sort((a, b) => (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0)).map((mission) => (
             <div 
               key={mission.id} 
               className={`p-5 rounded-xl border-l-8 shadow-md transition-all duration-300 ${
