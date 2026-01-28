@@ -19,6 +19,8 @@ export default function GuestJoinPage() {
   const [name, setName] = useState('')
   const [joined, setJoined] = useState(false)
   const [loading, setLoading] = useState(false)
+  // ★ loadingとは別に、ゲーム開始処理専用のフラグを作る
+  const [starting, setStarting] = useState(false)
   const [isHost, setIsHost] = useState(false) // DB登録後の確定フラグ
   
   // ロビー用ステート
@@ -106,8 +108,14 @@ export default function GuestJoinPage() {
   // -------------------------
   const startGame = async () => {
     if (!confirm('全員揃いましたか？ゲームを開始します！')) return
+    setStarting(true) // ★ボタンを無効化
     const { error } = await supabase.rpc('start_mission_game', { p_room_id: roomId })
-    if (error) alert('開始エラー')
+    
+    if (error) {
+      console.error(error)
+      alert('開始エラー: ' + error.message)
+      setStarting(false) // エラーならボタンを復活
+    }
   }
 
   // 招待用URL
@@ -197,14 +205,15 @@ export default function GuestJoinPage() {
         <div className="fixed bottom-0 left-0 w-full p-4 bg-gray-900 border-t border-gray-800">
           <button
             onClick={startGame}
-            disabled={players.length < 2} // 1人じゃ遊べないようにする
+            disabled={players.length < 2 || starting} 
             className={`w-full font-bold py-4 rounded-full text-xl shadow-lg transition ${
               players.length < 2
                 ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 : 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse'
             }`}
           >
-            ゲームスタート！
+            {/* ★テキストを出し分け */}
+            {starting ? '準備中...' : 'ゲームスタート！'}
           </button>
           {players.length < 2 && <p className="text-center text-xs text-gray-500 mt-2">※最低2人必要です</p>}
         </div>
