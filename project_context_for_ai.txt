@@ -21,6 +21,7 @@
 │   │   │       │   ├── play
 │   │   │       │   │   └── page.tsx
 │   │   │       │   └── result
+│   │   │       │       └── page.tsx
 │   │   │       └── page.tsx
 │   │   ├── (site)
 │   │   │   ├── about
@@ -97,6 +98,8 @@ export default nextConfig;
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.93.2",
+    "@types/canvas-confetti": "^1.9.0",
+    "canvas-confetti": "^1.9.4",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -350,6 +353,8 @@ export default function GuestJoinPage() {
   const [name, setName] = useState('')
   const [joined, setJoined] = useState(false)
   const [loading, setLoading] = useState(false)
+  // ★ loadingとは別に、ゲーム開始処理専用のフラグを作る
+  const [starting, setStarting] = useState(false)
   const [isHost, setIsHost] = useState(false) // DB登録後の確定フラグ
   
   // ロビー用ステート
@@ -437,8 +442,14 @@ export default function GuestJoinPage() {
   // -------------------------
   const startGame = async () => {
     if (!confirm('全員揃いましたか？ゲームを開始します！')) return
+    setStarting(true) // ★ボタンを無効化
     const { error } = await supabase.rpc('start_mission_game', { p_room_id: roomId })
-    if (error) alert('開始エラー')
+    
+    if (error) {
+      console.error(error)
+      alert('開始エラー: ' + error.message)
+      setStarting(false) // エラーならボタンを復活
+    }
   }
 
   // 招待用URL
@@ -528,14 +539,15 @@ export default function GuestJoinPage() {
         <div className="fixed bottom-0 left-0 w-full p-4 bg-gray-900 border-t border-gray-800">
           <button
             onClick={startGame}
-            disabled={players.length < 2} // 1人じゃ遊べないようにする
+            disabled={players.length < 2 || starting} 
             className={`w-full font-bold py-4 rounded-full text-xl shadow-lg transition ${
               players.length < 2
                 ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 : 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse'
             }`}
           >
-            ゲームスタート！
+            {/* ★テキストを出し分け */}
+            {starting ? '準備中...' : 'ゲームスタート！'}
           </button>
           {players.length < 2 && <p className="text-center text-xs text-gray-500 mt-2">※最低2人必要です</p>}
         </div>
@@ -563,6 +575,200 @@ export default function GuestJoinPage() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+```
+
+## File: src/app/(games)/mission-complete/[roomId]/result/page.tsx
+```tsx
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import confetti from 'canvas-confetti'
+
+// 型定義
+type Mission = { id: string; mission_content: string; status: string }
+type PlayerResult = {
+  id: string
+  name: string
+  score: number
+  missions: Mission[]
+}
+
+export default function ResultPage() {
+  const { roomId } = useParams()
+  const router = useRouter()
+  const [results, setResults] = useState<PlayerResult[]>([])
+  const [loading, setLoading] = useState(true)
+  const [openPlayerId, setOpenPlayerId] = useState<string | null>(null) // 詳細を開いているプレイヤー
+
+  useEffect(() => {
+    const fetchResult = async () => {
+      // 1. プレイヤーとスコアを取得（スコア高い順）
+      const { data: players } = await supabase
+        .from('players')
+        .select('id, name, score')
+        .eq('room_id', roomId)
+        .order('score', { ascending: false })
+
+      if (!players) return
+
+      // 2. 全員のミッション履歴を取得してマージする
+      // (N+1問題になるけど人数少ないから一旦ループで回す)
+      const fullResults = await Promise.all(
+        players.map(async (p) => {
+          const { data: missions } = await supabase
+            .from('mc_player_missions')
+            .select('id, mission_content, status')
+            .eq('player_id', p.id)
+            .eq('status', 'completed') // 完了したものだけ取得
+
+          return {
+            ...p,
+            missions: missions || []
+          } as PlayerResult
+        })
+      )
+
+      setResults(fullResults)
+      setLoading(false)
+
+      // 3. 演出：紙吹雪ドーン！
+      runConfetti()
+    }
+
+    fetchResult()
+  }, [roomId])
+
+  // 紙吹雪エフェクト
+  const runConfetti = () => {
+    const duration = 3000
+    const end = Date.now() + duration
+
+    ;(function frame() {
+      confetti({
+        particleCount: 5,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0 },
+        colors: ['#FFD700', '#FFA500'] // 金・オレンジ
+      })
+      confetti({
+        particleCount: 5,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1 },
+        colors: ['#FFD700', '#FFA500']
+      })
+
+      if (Date.now() < end) {
+        requestAnimationFrame(frame)
+      }
+    })()
+  }
+
+  // アコーディオン開閉
+  const toggleDetails = (playerId: string) => {
+    setOpenPlayerId(openPlayerId === playerId ? null : playerId)
+  }
+
+  // 新しいゲームへ（トップに戻る）
+  const goHome = () => {
+    router.push('/mission-complete')
+  }
+
+  if (loading) return <div className="text-center text-white mt-20">集計中...</div>
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white p-4 pb-20">
+      <h1 className="text-4xl font-bold text-center text-yellow-400 mb-2 tracking-widest">
+        RESULT
+      </h1>
+      <p className="text-center text-gray-400 mb-8">結果発表</p>
+
+      {/* ランキングリスト */}
+      <div className="max-w-2xl mx-auto space-y-4">
+        {results.map((player, index) => {
+          const rank = index + 1
+          const isTop = rank === 1
+          
+          return (
+            <div 
+              key={player.id}
+              className={`rounded-xl overflow-hidden transition-all duration-300 ${
+                isTop 
+                  ? 'bg-gradient-to-r from-yellow-600 to-yellow-800 border-2 border-yellow-400 shadow-[0_0_20px_rgba(255,215,0,0.5)] transform scale-105'
+                  : 'bg-gray-800 border border-gray-700'
+              }`}
+            >
+              {/* プレイヤー行（クリックで詳細） */}
+              <div 
+                onClick={() => toggleDetails(player.id)}
+                className="p-4 flex items-center gap-4 cursor-pointer hover:bg-white/5"
+              >
+                {/* 順位バッジ */}
+                <div className={`
+                  w-12 h-12 flex items-center justify-center rounded-full font-bold text-xl shadow-lg
+                  ${rank === 1 ? 'bg-yellow-400 text-black' : 
+                    rank === 2 ? 'bg-gray-300 text-gray-800' :
+                    rank === 3 ? 'bg-yellow-700 text-white' : 'bg-gray-700 text-gray-400'}
+                `}>
+                  {rank}
+                </div>
+
+                {/* 名前 */}
+                <div className="flex-1">
+                  <div className="font-bold text-lg flex items-center gap-2">
+                    {player.name}
+                    {isTop && <span className="text-2xl">👑</span>}
+                  </div>
+                  <div className="text-xs text-gray-300">
+                    タップして履歴を見る ▼
+                  </div>
+                </div>
+
+                {/* スコア */}
+                <div className="text-right">
+                  <span className="text-3xl font-bold">{player.score}</span>
+                  <span className="text-xs ml-1">pt</span>
+                </div>
+              </div>
+
+              {/* 詳細（アコーディオン中身） */}
+              {openPlayerId === player.id && (
+                <div className="bg-black/30 p-4 border-t border-white/10 animate-in slide-in-from-top-2">
+                  <h4 className="text-xs text-gray-400 mb-2 font-bold">達成した極秘任務リスト:</h4>
+                  {player.missions.length === 0 ? (
+                    <p className="text-gray-500 text-sm italic">任務達成なし... スパイ失格！</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {player.missions.map((m) => (
+                        <li key={m.id} className="text-sm flex items-start gap-2 text-gray-200">
+                          <span className="text-yellow-500 mt-0.5">✓</span>
+                          {m.mission_content}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ホームへ戻るボタン */}
+      <div className="mt-12 text-center">
+        <button
+          onClick={goHome}
+          className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-8 rounded-full transition"
+        >
+          トップへ戻る
+        </button>
+      </div>
     </div>
   )
 }
@@ -737,6 +943,7 @@ export default function LobbyPage() {
 import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import confetti from 'canvas-confetti' 
 
 // 型定義
 type Mission = { id: string; mission_content: string; status: string }
@@ -753,6 +960,64 @@ export default function PlayPage() {
   const [showAdminMenu, setShowAdminMenu] = useState(false) // 管理メニュー用
   const [notification, setNotification] = useState<string | null>(null) // 速報用
 
+  // --- アクション関数定義 ---
+
+  // お題チェンジ（ホストのみ）
+  // ★ここを修正しました：RPCの結果を受け取って即座に画面反映させる
+  const handleChangeTopic = async () => {
+    setShowAdminMenu(false)
+    
+    // RPCを呼び出し、戻り値(data)として新しいお題を受け取る
+    const { data, error } = await supabase.rpc('change_topic', { p_room_id: roomId })
+    
+    if (error) {
+      console.error(error)
+      alert('お題の変更に失敗しました: ' + error.message)
+    } else if (data) {
+      // 即座にステートを更新（通信待ちラグを解消）
+      setCurrentTopic(data)
+    }
+  }
+
+   // ミッション達成（わんこそば形式）
+  const completeMission = async (missionId: string) => {
+    // 1. まず手元の画面で、押したやつを「完了」にする（見た目の即時反応）
+    setMissions(prev => prev.map(m => m.id === missionId ? { ...m, status: 'completed' } : m))
+    
+    // 2. サーバーの必殺技を呼び出す
+    const { data: newMission, error } = await supabase.rpc('complete_and_refill', { 
+      p_mission_id: missionId 
+    })
+
+    if (error) {
+      console.error(error)
+      alert('通信エラーが発生しました')
+    } else if (newMission) {
+      // 3. サーバーから返ってきた「新しいミッション」をリストに追加する！
+      //    (少しアニメーション的な「間」があると気持ちいいので300ms待つ)
+      setTimeout(() => {
+         setMissions(prev => [
+           // 新しい順（上）に来るように追加するか、リストの下に追加するか
+           // ここでは「完了したのはそのまま、一番下に新しいのが来る」ようにします
+           ...prev, 
+           newMission as Mission
+         ])
+         
+         // ついでに「指令受信！」みたいな通知を自分だけに出すと盛り上がる
+         showNotification('📡 新しい指令を受信しました')
+      }, 500)
+    }
+  }
+
+
+  // 通知表示ヘルパー
+  const showNotification = (msg: string) => {
+    setNotification(msg)
+    setTimeout(() => setNotification(null), 3000)
+  }
+
+  // --- 初期化と監視 ---
+
   useEffect(() => {
     const storedId = localStorage.getItem('mc_player_id')
     if (!storedId) return 
@@ -760,29 +1025,36 @@ export default function PlayPage() {
 
     // 1. 初期データ取得
     const initData = async () => {
-      // プレイヤー情報（ホスト確認）
+      // A. プレイヤー情報（ホスト権限チェック）
       const { data: player } = await supabase
         .from('players')
         .select('is_host')
         .eq('id', storedId)
         .single()
-      if (player) setIsHost(player.is_host)
+      
+      const isUserHost = player?.is_host || false
+      if (player) setIsHost(isUserHost)
 
-      // ミッション取得
+      // B. 自分のミッション取得
       const { data: myMissions } = await supabase
         .from('mc_player_missions')
         .select('*')
         .eq('player_id', storedId)
       if (myMissions) setMissions(myMissions)
 
-      // 現在のお題を取得
+      // C. 現在のお題を取得
       const { data: room } = await supabase
         .from('rooms')
         .select('current_topic')
         .eq('id', roomId)
         .single()
-      if (room && room.current_topic) setCurrentTopic(room.current_topic)
-      else if (player?.is_host) handleChangeTopic() // お題が空ならホストが初期化
+      
+      if (room && room.current_topic) {
+        setCurrentTopic(room.current_topic)
+      } else if (isUserHost) {
+        // お題が空っぽで、かつ自分がホストなら、最初のお題を抽選する
+        handleChangeTopic()
+      }
 
       setLoading(false)
     }
@@ -790,16 +1062,19 @@ export default function PlayPage() {
     initData()
 
     // 2. リアルタイム監視
-    // A. お題の変更を監視
+    // A. お題の変更を監視 (他人が変えた場合用)
     const roomChannel = supabase.channel('play-room-topic')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         (payload) => {
           if (payload.new.current_topic) setCurrentTopic(payload.new.current_topic)
+        // ★ここを追加：ステータスが finished になったらリザルトへ
+        if (payload.new.status === 'finished') {
+          router.push(`/mission-complete/${roomId}/result`)
+        }
         }
       ).subscribe()
     
     // B. 他人のミッション達成を監視（速報用）
-    // ※今回は誰が達成したかまで厳密に取らず、とりあえず「誰か」で通知する簡易版
     const missionChannel = supabase.channel('play-missions')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mc_player_missions' },
         (payload) => {
@@ -813,32 +1088,17 @@ export default function PlayPage() {
       supabase.removeChannel(roomChannel)
       supabase.removeChannel(missionChannel)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
-
-  // --- アクション関数 ---
-
-  // お題チェンジ（ホストのみ）
-  const handleChangeTopic = async () => {
-    setShowAdminMenu(false)
-    const { error } = await supabase.rpc('change_topic', { p_room_id: roomId })
-    if (error) console.error(error)
-  }
-
-  // ミッション達成（自分）
-  const completeMission = async (missionId: string) => {
-    // UIを即座に更新
-    setMissions(prev => prev.map(m => m.id === missionId ? { ...m, status: 'completed' } : m))
+   // ホスト用：ゲーム終了関数
+  const finishGame = async () => {
+    if (!confirm('本当にゲームを終了して結果発表に移りますか？')) return
     
-    await supabase
-      .from('mc_player_missions')
-      .update({ status: 'completed' })
-      .eq('id', missionId)
-  }
-
-  // 通知表示ヘルパー
-  const showNotification = (msg: string) => {
-    setNotification(msg)
-    setTimeout(() => setNotification(null), 3000)
+    const { error } = await supabase.rpc('finish_game', { p_room_id: roomId })
+    if (error) {
+      alert('終了処理に失敗: ' + error.message)
+    }
+    // 成功すれば上のリアルタイム検知で勝手に遷移する
   }
 
   if (loading) return <div className="text-center text-white mt-20">Loading...</div>
@@ -862,7 +1122,7 @@ export default function PlayPage() {
               </button>
               {/* 管理メニュー */}
               {showAdminMenu && (
-                <div className="absolute right-0 top-10 bg-white text-black rounded-lg shadow-xl w-48 overflow-hidden z-50">
+                <div className="absolute right-0 top-10 bg-white text-black rounded-lg shadow-xl w-48 overflow-hidden z-50 animate-in fade-in zoom-in duration-200">
                   <button 
                     onClick={handleChangeTopic}
                     className="w-full text-left px-4 py-3 hover:bg-gray-100 border-b font-bold"
@@ -870,7 +1130,7 @@ export default function PlayPage() {
                     🎲 話題を変える
                   </button>
                   <button 
-                    onClick={() => alert('リザルト画面は未実装です！')}
+                    onClick={finishGame} // ★ここを紐付け
                     className="w-full text-left px-4 py-3 hover:bg-gray-100 text-red-600 font-bold"
                   >
                     🏁 ゲーム終了
@@ -888,7 +1148,7 @@ export default function PlayPage() {
 
       {/* 2. 速報通知エリア */}
       {notification && (
-        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-black px-6 py-2 rounded-full shadow-lg font-bold animate-bounce z-50 whitespace-nowrap">
+        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-black px-6 py-2 rounded-full shadow-lg font-bold animate-bounce z-50 whitespace-nowrap border-2 border-black">
           {notification}
         </div>
       )}
@@ -897,12 +1157,14 @@ export default function PlayPage() {
       <div className="p-4">
         <p className="text-gray-500 font-bold text-sm mb-4 ml-2">YOUR MISSIONS</p>
         <div className="space-y-4">
-          {missions.map((mission) => (
+          {missions
+          // ★並び替え: 未達成(pending)が先、完了(completed)は後ろ
+            .sort((a, b) => (a.status === 'completed' ? 1 : 0) - (b.status === 'completed' ? 1 : 0)).map((mission) => (
             <div 
               key={mission.id} 
-              className={`p-5 rounded-xl border-l-8 shadow-md transition-all ${
+              className={`p-5 rounded-xl border-l-8 shadow-md transition-all duration-300 ${
                 mission.status === 'completed' 
-                  ? 'bg-gray-800 border-gray-600' 
+                  ? 'bg-gray-800 border-gray-600 scale-95' 
                   : 'bg-white border-yellow-500'
               }`}
             >
@@ -912,13 +1174,13 @@ export default function PlayPage() {
               
               {mission.status !== 'completed' ? (
                 <button 
-                  className="w-full bg-blue-600 active:bg-blue-700 text-white font-bold py-3 rounded-lg shadow active:scale-95 transition-transform"
+                  className="w-full bg-blue-600 active:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform"
                   onClick={() => completeMission(mission.id)}
                 >
                   任務完了
                 </button>
               ) : (
-                <div className="flex items-center justify-center gap-2 text-yellow-400 font-bold">
+                <div className="flex items-center justify-center gap-2 text-yellow-400 font-bold animate-pulse">
                   <span>✓</span> <span>COMPLETED</span>
                 </div>
               )}
