@@ -11,31 +11,24 @@ export default function MissionCompleteEntrance() {
   const createRoom = async () => {
     setLoading(true)
     
-    // 1. 4桁のランダムな部屋コードを生成
+    // 1. 部屋を作成
     const code = Math.floor(1000 + Math.random() * 9000).toString()
-
-    // 2. Supabaseに部屋を作成
     const { data, error } = await supabase
       .from('rooms')
-      .insert([
-        { 
-          code: code, 
-          game_type: 'mission-complete', 
-          status: 'waiting' 
-        }
-      ])
+      .insert([{ code, game_type: 'mission-complete', status: 'waiting' }])
       .select()
       .single()
 
     if (error) {
       console.error(error)
-      alert('部屋の作成に失敗しました')
+      alert('作成失敗')
       setLoading(false)
       return
     }
 
-    // 3. ロビー画面へ移動 (部屋のIDをURLに含める)
-    router.push(`/mission-complete/${data.id}/lobby`)
+    // 2. 参加画面へ移動（★ここを変更）
+    // PC用ロビーではなく、参加画面へ直接飛ばす。?role=host をつけるのがミソ。
+    router.push(`/mission-complete/${data.id}?role=host`)
   }
 
   return (
@@ -43,12 +36,9 @@ export default function MissionCompleteEntrance() {
       <h1 className="text-4xl font-bold mb-8 text-center text-yellow-400">
         MISSION<br/>COMPLETE
       </h1>
-      
-      <p className="mb-12 text-gray-300 text-center">
-        スパイのように任務を遂行せよ。<br/>
-        飲み会専用ミッションゲーム。
+      <p className="mb-12 text-gray-300 text-center text-sm">
+        スマホ1台で完結。<br/>幹事も一緒に遊べるスパイゲーム。
       </p>
-
       <button
         onClick={createRoom}
         disabled={loading}
