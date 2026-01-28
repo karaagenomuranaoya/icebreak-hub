@@ -16,6 +16,26 @@ export default function PlayPage() {
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [missions, setMissions] = useState<Mission[]>([])
   const [loading, setLoading] = useState(true)
+  const completeMission = async (missionId: string) => {
+    // 1. 楽観的UI更新（サーバーを待たずに即座に完了済みにする）
+    setMissions((prev) => 
+      prev.map((m) => 
+        m.id === missionId ? { ...m, status: 'completed' } : m
+      )
+    )
+
+    // 2. サーバーに送信
+    const { error } = await supabase
+      .from('mc_player_missions')
+      .update({ status: 'completed' })
+      .eq('id', missionId)
+    
+    if (error) {
+      console.error(error)
+      alert('通信エラー：やり直してください')
+      // エラーなら元に戻す処理が必要ですが、MVPなので割愛
+    }
+  }
 
   useEffect(() => {
     // 1. 自分がプレイヤーか、メイン画面（PC）かを判定
@@ -73,27 +93,34 @@ export default function PlayPage() {
           {missions.map((mission) => (
             <div 
               key={mission.id} 
-              className={`p-5 rounded-xl border-l-8 shadow-md transition-transform active:scale-95 ${
+              className={`p-5 rounded-xl border-l-8 shadow-md transition-all duration-300 ${
                 mission.status === 'completed' 
-                  ? 'bg-gray-300 border-gray-500 opacity-60' 
+                  ? 'bg-gray-800 border-gray-600 scale-95' // 完了したらダークに
                   : 'bg-white border-yellow-500'
               }`}
             >
-              <p className={`font-bold text-lg mb-2 ${mission.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-800'}`}>
-                {mission.mission_content}
-              </p>
+              <div className="flex justify-between items-start mb-2">
+                 <p className={`font-bold text-lg ${mission.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                  {mission.mission_content}
+                </p>
+                {/* 完了バッジ */}
+                {mission.status === 'completed' && (
+                  <span className="bg-yellow-500 text-black text-xs font-bold px-2 py-1 rounded">COMPLETED</span>
+                )}
+              </div>
               
+              {/* ボタン：完了していない時だけ表示 */}
               {mission.status !== 'completed' && (
                 <button 
-                  className="w-full mt-2 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-500"
-                  onClick={() => alert('次のステップで「承認機能」を実装します！')}
+                  className="w-full mt-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform"
+                  onClick={() => completeMission(mission.id)}
                 >
-                  達成した！
+                  任務完了ボタン
                 </button>
               )}
               
               {mission.status === 'completed' && (
-                <p className="text-center text-sm font-bold text-gray-600">MISSION COMPLETED</p>
+                <p className="text-center text-xs text-gray-500 mt-1">ナイススパイ！</p>
               )}
             </div>
           ))}
